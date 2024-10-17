@@ -1,0 +1,5 @@
+# Distribution / packaging
+dist/
+
+# RootFs
+parrot-rootfs.tar.xz
