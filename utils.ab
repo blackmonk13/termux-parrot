@@ -1,0 +1,39 @@
+import { len, lines } from "std/text"
+
+pub fun select(choices: [Text]): Text? {
+    let selected = $
+        select choice in "{choices}"; do 
+            if [ -n "\$choice" ]; then
+                echo "\$choice"
+                break; 
+            fi 
+        done$?
+
+    return selected
+}
+
+pub fun is_empty(value): Bool {
+    if len(value) <= 0 {
+        return true
+    } else {
+        return false
+    }
+}
+
+pub fun array_slice(array, index) {
+    let result = [array[index]]
+    loop i in (index + 1)..len(array) {
+        result += [array[i]]
+    }
+    return result
+}
+
+pub fun get_interactive_users(install_path: Text): [Text] {
+    let users = ""
+    users = $awk -F: '\$6 ~ /^\/home/ && \$7 !~ /(\/usr\/sbin\/nologin|\/bin\/false)/ \{print \$1}' {install_path}/etc/passwd$ failed {
+        echo "Failed to get users"
+    }
+    let user_list = lines(users)
+
+    return user_list
+}

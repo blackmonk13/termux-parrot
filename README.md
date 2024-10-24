@@ -16,67 +16,78 @@
 
 ---
 
-<p align="center"> Few lines describing your project.
-    <br>
+<p align="center">
+    A script to install and run Parrot OS within Termux, providing a lightweight command-line interface with plans for future desktop environment support.
 </p>
 
 ## 📝 Table of Contents
 
 - [About](#about)
 - [Getting Started](#getting_started)
-- [Deployment](#deployment)
+- [Prerequisites](#prerequisites)
+- [Installing](#installing)
 - [Usage](#usage)
 - [Built Using](#built_using)
-- [TODO](../TODO.md)
-- [Contributing](../CONTRIBUTING.md)
+- [TODO](#todo)
+- [Contributing](#contributing)
 - [Authors](#authors)
 - [Acknowledgments](#acknowledgement)
 
-## 🧐 About <a name = "about"></a>
+## 🧐 About <a name="about"></a>
+Termux Parrot is an installer script written in Amber that allows you to run Parrot OS within Termux on Android devices. The project aims to provide a seamless way to access Parrot OS tools and environments on mobile devices, with current support for CLI interface and planned extensions for desktop environment access via VNC.
 
-Write about 1-2 paragraphs describing the purpose of your project.
+The installer handles the complete setup process, including downloading the appropriate Parrot OS rootfs, verifying its integrity, configuring the environment, and setting up user accounts. It's designed to be user-friendly while maintaining security and stability.
 
 ## 🏁 Getting Started <a name = "getting_started"></a>
 
-These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See [deployment](#deployment) for notes on how to deploy the project on a live system.
-
 ### Prerequisites
 
-What things you need to install the software and how to install them.
+Before installing Termux Parrot, ensure you have:
 
-```
-Give examples
-```
+- Latest version of Termux installed from F-Droid
+- At least 2GB of free storage space
+- Working internet connection
 
 ### Installing
 
-A step by step series of examples that tell you how to get a development env running.
-
-Say what the step will be
-
-```
-Give the example
+1. Update Termux packages:
+```bash
+pkg update && pkg upgrade -y
 ```
 
-And repeat
-
+2. Run the installer:
+```bash
+bash <(curl -s "https://github.com/blackmonk13/termux-parrot/releases/download/latest/installer.sh")
 ```
-until finished
-```
-
-End with an example of getting some data out of the system or using it for a little demo.
 
 ## 🎈 Usage <a name="usage"></a>
 
-Add notes about how to use the system.
+After installation, you can:
 
-## 🚀 Deployment <a name = "deployment"></a>
+- Start Parrot OS CLI:
+```bash
+parrot
+```
 
-Add additional notes about how to deploy this on a live system.
+- Start Parrot OS CLI as root:
+```bash
+parrot -r
+```
 
-## ⛏️ Built Using <a name = "built_using"></a>
+## ⛏️ Built Using <a name="built_using"></a>
+- [Amber](https://amber-lang.com/) - Programming Language
+- [Termux](https://termux.dev/) - Android Terminal Emulator
+- [Parrot OS](https://www.parrotsec.org/) - Security OS
 
-- [Amber](https://amber-lang.com/)
+## 📌 TODO <a name="todo"></a>
+- [ ] Add desktop environment installation support
+- [ ] Implement VNC server configuration
+- [ ] Add storage access management
+- [ ] Add network tools configuration
+- [ ] Create backup and restore functionality
+
+## 🤝 Contributing <a name="contributing"></a>
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/blackmonk13/termux-parrot/issues).
 
 ## ✍️ Authors <a name = "authors"></a>
 
@@ -86,6 +97,7 @@ See also the list of [contributors](https://github.com/blackmonk13/termux-parrot
 
 ## 🎉 Acknowledgements <a name = "acknowledgement"></a>
 
-- Hat tip to anyone whose code was used
-- Inspiration
-- References
+- Kali NetHunter project for inspiration
+- Parrot OS team for their amazing security distribution
+- Termux developers for making Android CLI environments possible
+- The Amber programming language community

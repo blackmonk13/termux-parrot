@@ -1,0 +1,503 @@
+import { includes } from "std/array"
+import {
+    color_echo, 
+    confirm, 
+    error, 
+    echo_info, 
+    echo_success, 
+    echo_warning, 
+    exit,
+    input,
+    printf, 
+    is_command 
+} from "std/env"
+import { file_exist, file_read, file_write, make_executable } from "std/fs"
+import { download } from "std/http"
+import { len, lines, words, replace } from "std/text"
+
+import { select, is_empty, get_interactive_users } from "./utils.ab"
+
+fun log_s(message: Text): Null {
+    color_echo(message, 32)
+}
+
+fun log_i(message: Text): Null {
+    color_echo(message, 34)
+}
+
+fun log_w(message: Text): Null {
+    color_echo(message, 33)
+}
+
+fun logo() {
+    color_echo("                                             ", 40)    
+    color_echo("_____  ___  _____ _____  _____  _____        ", 36)
+    color_echo("||_// ||=|| ||_// ||_// ((   ))  ||          ", 36)
+    color_echo("||    || || || \\\\ || \\\\  \\\\_//   ||  \n", 36)
+    color_echo("                                             ", 40)
+}
+
+fun check_dependencies():Null? {
+    log_i("[⌛] Checking package dependencies...")
+    //  Workaround for termux-app issue #1283 (https://github.com/termux/termux-app/issues/1283)
+    // apt update -y &> /dev/null
+    $apt-get update -y &> /dev/null || apt-get -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" dist-upgrade -y &> /dev/null$?
+
+    let dependencies = ["proot", "tar", "axel"]
+    loop dep in dependencies {
+        if not is_command(dep) {
+            log_i("[⌛] Installing {dep}...")
+            silent $apt install -y {dep}$ failed {
+                log_w("[⚠] Failed to install {dep}.")
+                continue
+            }
+        }
+    }
+    silent $apt upgrade -y$?
+}
+
+fun get_arch():Text? {
+    let result = $dpkg --print-architecture$?
+    if {
+        result == "aarch64": return "arm64"
+        result == "arm64": return "arm64"
+        result == "arm": return "armhf"
+        result == "amd64": return "amd64"
+        result == "x86_64": return "amd64"
+        result == "i*86": return "i386"
+        result == "x86": return "i386"
+        else: fail 1
+    }
+}
+
+fun select_version():Text? {
+    log_i("[⌛] Getting available Parrot OS versions")
+    
+    
+    let result = $curl -s https://deb.parrot.sh/parrot/iso/ | grep -oP '\d+\.\d+' | sort -u$?
+    let versions = lines(result)
+
+    if len(versions) == 0 {
+        log_w("[⚠] No Parrot OS versions found")
+        fail 1
+    }
+
+    let versions_with_rootfs = [Text]
+
+    loop ver in versions {
+        let ver_url = "https://deb.parrot.sh/parrot/iso/{ver}/"
+        let rootfs_files = $curl -s {ver_url} | grep -oP 'Parrot-rootfs-\d+\.\d+_\S+\.tar\.xz'$ failed {
+            // echo "No rootfs found for version {ver}"
+            continue
+        }
+        versions_with_rootfs += [ver]
+    }
+
+    if len(versions_with_rootfs) == 0 {
+        fail 1
+    }
+
+    log_i("[❔] Select the version you want to install:")
+    let selected_version = select(versions_with_rootfs)?
+
+    return selected_version
+}
+
+fun download_rootfs(arch: Text, version: Text, tarball: Text):Bool {
+    let rootfs_archive = "Parrot-rootfs-{version}_{arch}.tar.xz"
+    let url = "https://deb.parrot.sh/parrot/iso/{version}/{rootfs_archive}"
+    let d_text = "[⌛] Downloading Rootfs for version {version}, this may take a while based on your internet speed."
+    
+    if file_exist(tarball) {
+        let overwrite = confirm("[❔] File exists, do you want to overwrite?")
+        if overwrite {
+            log_i(d_text)
+            return download(url, tarball)
+        } else {
+            log_w("[⚠] File exists, skipping download")
+            return true
+        }
+    }
+
+    let downloaded = download(url, tarball)
+    return downloaded
+}
+
+fun get_sha(arch: Text, version: Text):Text? {
+    let rootfs_archive = "Parrot-rootfs-{version}_{arch}.tar.xz"
+    let sha_url = "https://deb.parrot.sh/parrot/iso/{version}/signed-hashes.txt"
+    let signed_hashes = $curl -s {sha_url}$?
+    let current_hash_type = ""
+    let hash_value = ""
+
+    loop iter in lines(signed_hashes) {
+        if iter == "sha512" {
+            current_hash_type = "sha512"
+        }
+        if current_hash_type == "sha512" {
+            let hash_and_archive = words(iter)
+            if includes(hash_and_archive, rootfs_archive) {
+                hash_value = hash_and_archive[0]
+                break
+            } else {
+                continue
+            }
+            
+        }
+
+    }
+
+    return hash_value
+}
+
+fun verify_sha(tarball: Text, sha: Text):Bool? {
+    let actual_sha= $sha512sum "{tarball}" | awk '\{print \$1}'$?
+    return actual_sha == sha
+}
+
+fun get_and_verify_rootfs(arch: Text, ver: Text, tarball: Text):Bool? {
+    let version = ver
+    let sha = get_sha(arch, version)?
+    let verified = verify_sha(tarball, sha)?
+    let rootfs_downloaded = file_exist(tarball)
+    if not verified {
+        log_w("[⚠] Rootfs corrupted.\n")
+        loop {
+            if verified  {
+                break
+            }
+
+            let redownload = confirm("[❔] Do you want to download it again?")
+            if not redownload {
+                log_w("[⚠] Please run this installer again or download the file manually")
+                exit(0)
+            }
+
+            let change_version = confirm("[❔] Do you want to change version?")
+
+            if change_version {
+                version = select_version()?
+                sha = get_sha(arch, version)?
+            }
+
+            rootfs_downloaded = download_rootfs(arch, version, tarball)
+
+            verified = verify_sha(tarball, sha)?
+        }
+    }
+
+    return verified
+    
+}
+
+fun extract_rootfs(tarball: Text): Null? {
+    
+    $
+    spinner() \{
+        local pid=\$1
+        local delay=0.1
+        local spinstr='|/-\\'
+
+        while [ "\$(ps a | awk '\{print \$1}' | grep \$pid)" ]; do
+            local temp=\$\{spinstr#?}
+            
+            printf " [%c]  " "\$spinstr"
+            
+            local spinstr=\$temp\$\{spinstr%"\$temp"}
+            
+            sleep \$delay        
+            printf "\b\b\b\b\b\b"
+        done
+        printf "    \b\b\b\b"
+    }                            
+    (proot --link2symlink tar -xf "{tarball}" 2> \/dev\/null || :) &
+    pid=\$!
+    spinner \$pid$?
+    // $proot --link2symlink tar -xf "{tarball}" 2> \/dev\/null || :$?
+}
+
+fun build_launcher(tarball: Text, install_path: Text): Null? {
+    let parrot_launcher = "\$PREFIX/bin/parrot"
+    let parrot_shortcut = "\$PREFIX/bin/po"
+    
+
+    // let launcher_content = $curl -s http://localhost/parrot.sh$?
+    let launcher_content = $curl -s https://github.com/blackmonk13/termux-parrot/releases/download/latest/parrot-launcher.sh$?
+    let new_content = replace(launcher_content, "placeholder_install_folder", "{install_path}")
+    file_write(parrot_launcher, new_content)?
+    
+    log_i("[⌛] Fixing launcher shebang...")
+    $termux-fix-shebang {parrot_launcher}$?
+
+    log_i("[⌛] Making launcher executable...")
+    make_executable(parrot_launcher)
+
+    if not file_exist("{install_path}/root/.parrot") {
+        $touch {install_path}/root/.parrot$?
+    }
+    
+}
+
+fun fix_profile_bash(install_path: Text): Null? {
+    // Prevent attempt to create links in read only filesystem
+    let bash_profile = "{install_path}/root/.bash_profile"
+    if file_exist(bash_profile) {
+        $sed -i '/if/,/fi/d' "{bash_profile}"$?
+    }
+}
+
+fun fix_sudo(install_path: Text): Null? {
+    // fix sudo & su on start
+    $chmod +s {install_path}/usr/bin/sudo$?
+    $chmod +s {install_path}/usr/bin/sudo$?
+
+    // https://bugzilla.redhat.com/show_bug.cgi?id=1773148
+    $echo "Set disable_coredump false" > {install_path}/etc/sudo.conf$?
+}
+
+fun create_interactive_user(username: Text): Bool {
+    $parrot -r useradd -m -s /bin/bash {username}$ failed {
+        log_w("[⚠] Failed to create user.")
+        return false
+    }
+
+    let password_created = false
+
+    loop {
+        if password_created {
+            break
+        }
+
+        let password_failed = false
+
+        $parrot -r passwd {username}$ failed {
+            log_w("[⚠] Failed to create password")
+            let try_again = confirm("[❔] Do you want to try again?")
+
+            if not try_again {
+                break
+            }
+
+            password_failed = true
+        }
+
+        if not password_failed {
+            password_created  = true
+        }
+
+    }
+
+    return password_created
+
+}
+
+fun configure_dns(install_path: Text): Bool {
+    log_i("[❔] Please select a dns provider:")
+    let dns_providers = ["Cloudflare", "Google"]
+    
+    let cloudflare_dns = ["1.1.1.1", "1.0.0.1"]
+    let google_dns = ["8.8.8.8", "8.8.4.4"]
+
+    let dns_provider = select(dns_providers) failed {
+        return false
+    }
+
+    let dns_entries = ""
+
+    // Maps/Dictionaries would be great here
+    if dns_provider == dns_providers[0] {
+        loop entry in cloudflare_dns {
+            dns_entries += "nameserver {entry}\n"
+        }
+    } else {
+        loop entry in google_dns {
+            dns_entries += "nameserver {entry}\n"
+        }
+    }
+
+    let resolv_conf_path = "{install_path}/etc/resolv.conf"
+
+    if not file_exist(resolv_conf_path) {
+        return false
+    }
+
+    let content = file_read(resolv_conf_path) failed {
+        return false
+    }
+
+    let new_content = "{content}\n{dns_entries}"
+
+    file_write(resolv_conf_path, new_content) failed {
+        return false
+    }
+
+    return true
+}
+
+fun configure_packages(): Bool {
+    // let packages = [ "sudo",  "resolvconf", "parrot-updater"]
+    let packages = [ "sudo",  "resolvconf"]
+
+    // Get updates 
+    $parrot -r apt-get update$ failed {
+        log_w("[⚠] Failed to get updates")
+        return false
+    }
+    
+    // Upgrade packages 
+    let confirm_upgrade = confirm("[❔] Do you want to pgrade packages?")
+    if confirm_upgrade {
+        $parrot -r apt-get upgrade -y$ failed {
+            log_w("[⚠] Failed to upgrade")
+        }
+    }
+    
+
+    $parrot -r apt-get install {packages}$ failed {
+        log_w("[⚠] Failed to get packages")
+        return false
+    }
+
+    return true
+    
+}
+
+main {
+    logo()
+    check_dependencies() failed {
+        log_w("[⚠] Failed to check for dependencies")
+    }
+    let architecture = get_arch() failed {
+        error("[⛔] Unsupported Architecture")
+    }
+
+    let folder = "parrot-${architecture}"
+    let tarball = "parrot-rootfs.tar.xz"
+
+    let version = select_version()?
+
+    let rootfs_downloaded = file_exist(tarball)
+
+    if not rootfs_downloaded {
+        rootfs_downloaded = download_rootfs(architecture, version, tarball) 
+    }
+
+    loop {
+        if rootfs_downloaded == true {
+            break
+        }
+
+        log_w("[⚠] Rootfs download failed")
+        let try_again = confirm("[❔] Do you want to try again?")
+
+        if not try_again {
+            exit(0)
+        }
+
+        let change_version = confirm("[❔] Do you want to change version?")
+
+        if change_version {
+            version = select_version()?
+        }
+
+        rootfs_downloaded = download_rootfs(architecture, version, tarball)      
+    }
+
+    log_i("[⌛] Verifying integrity of rootfs...")
+    
+    let verified = get_and_verify_rootfs(architecture, version, tarball)?
+
+    if not verified {
+        error("[⛔] Rootfs verification failed")
+    }
+
+    log_i("[⌛] Extracting rootfs...")
+    extract_rootfs(tarball) failed {
+        error("[⛔] Rootfs Extraction failed")
+    }
+
+    let install_folder = $tar -tf {tarball} | awk -F/ '\{print \$1}' | uniq | head -n 1$ failed {
+        error("[⛔] Failed to get install folder")
+    }
+    let install_path = $realpath {install_folder}$ failed {
+        error("[⛔] Failed to get install folder")
+    }
+    
+    
+    log_i("[⌛] Configuring Parrot for Termux ...")
+    build_launcher(tarball, install_path)?
+    fix_profile_bash(install_path)?
+
+    log_i("[⌛] Configuring DNS servers ...")
+    let dns_configured = configure_dns(install_path)
+    loop {
+        if dns_configured {
+            break
+        }
+
+        log_w("[⚠] DNS Configuration Error")
+        let retry_dns_configuration = confirm("[❔] Do you want to try again?")
+        if retry_dns_configuration {
+            dns_configured = configure_dns(install_path)
+        } else {
+            break
+        }
+    }
+
+    // TODO: Check for internet access
+
+    let packages_configured = configure_packages()
+
+    loop {
+        if packages_configured {
+            break
+        }
+
+        log_w("[⚠] Failed to configure packages")
+        let retry_package_configuration = confirm("[❔] Do you want to try again?")
+        if retry_package_configuration {
+            packages_configured = configure_packages()
+        } else {
+            break
+        }
+    }
+
+    if packages_configured {
+        fix_sudo(install_path) failed {
+            log_w("[⚠] Failed to configure sudo")
+        }
+    }
+
+
+    log_i("\n\n[⌛] Configuring interactive user ...")
+
+    let username = input("[❔] Username: ")
+
+    if is_empty(username) {
+        log_i("[ℹ] Using default username: 'parrot")
+        username = "parrot"
+    }
+
+    log_w("[⚠] You can change the password using 'passwd'")
+    
+    let user_created = create_interactive_user(username)
+
+    if user_created {
+        let interactive_users = get_interactive_users(install_path)
+        user_created = includes(interactive_users, username)
+        log_i("[ℹ] User '{username}' has been created.")
+        log_i("[ℹ] Adding '{username}' to sudoers file.")
+        $echo "{username}    ALL=(ALL:ALL) ALL" > {install_path}/etc/sudoers.d/{username}$ failed {
+            log_w("[⚠] Failed to add '{username}' to sudoers")
+        }
+    }
+
+
+    unsafe $clear$
+
+    logo()
+    log_s("[✔] Parrot for Termux installed successfully")
+    log_i("[ℹ] To start Parrot OS, type:")
+    log_i("[ℹ] parrot           # To start the CLI")
+    log_i("[ℹ] parrot -r        # To start the CLI as root")
+}

@@ -1,0 +1,104 @@
+import {
+    confirm, 
+    echo_warning, 
+    shell_unset 
+} from "std/env"
+import { file_exist } from "std/fs"
+import { join, len, lines } from "std/text"
+
+import { select, is_empty, array_slice, get_interactive_users } from "./utils.ab"
+
+main(args) {
+    let parrot_folder = "placeholder_install_folder"
+    
+    let default_username = "root"
+
+    let access_home = false
+    // TODO:
+    let access_sdcard = false
+    // TODO:
+    let access_storage = false
+
+    // termux-exec sets LD_PRELOAD so let's unset it before continuing
+    shell_unset("LD_PRELOAD")?
+
+    // Workaround for Libreoffice, also needs to bind a fake /proc/version
+    let version_file = "{parrot_folder}/root/.version"
+
+    if not file_exist(version_file) {
+        $touch {version_file}$ failed {
+            echo_warning("Failed to create version file")
+        }
+    }
+
+    let clean_args = array_slice(args, 1)
+
+    let interactive_users = get_interactive_users(parrot_folder)
+
+    if {
+        len(interactive_users) == 1 {
+            default_username = interactive_users[0]
+        } 
+        else {
+            let selected_user = select(interactive_users) failed {
+                default_username = interactive_users[0]
+            }
+        }  
+    }
+
+    let home = "/home/{default_username}"
+    let start = "sudo -u {default_username} /bin/bash"
+
+    let use_root = clean_args[0] == "-r" or clean_args[0] == "-R"
+
+    if default_username == "root" or use_root or not file_exist("{parrot_folder}/usr/bin/sudo") {
+        home = "/root"
+        start = "/bin/bash --login"
+    }
+    
+    if use_root {
+        clean_args = array_slice(clean_args, 1)
+    }
+
+
+    let command = [
+        "proot",
+        "--link2symlink",
+        "-0",
+        "-r",
+        "{parrot_folder}",
+        "-b /dev",
+        "-b /proc",
+        "-b {parrot_folder}/root:/dev/shm",
+    ]
+
+    // Gain access to the home directory of termux
+    if access_home {
+        command += ["-b /data/data/com.termux/files/home:/root"]
+    }
+    
+    command += ["-w"]
+    command += [home]
+    command += ["/usr/bin/env -i"]
+    command += ["HOME={home}"]
+    command += ["PATH=/usr/local/sbin:/usr/local/bin:/bin:/usr/bin:/sbin:/usr/sbin:/usr/games:/usr/local/games"]
+    command += ["TERM=\$TERM"]
+    command += ["LANG=C.UTF-8"]
+    command += [start]
+
+    let cmdline = join(command, " ")
+
+    // echo cmdline
+    // echo args
+
+    if len(clean_args) <= 1 {
+        $exec {cmdline}$?
+    } else {
+        let cmd_args = join(clean_args, " ")
+        // Create an echo command that will output our command
+        let echo_cmd = "echo \"{cmd_args}\""
+        // Use process substitution to feed the command to bash
+        $exec {cmdline} -c "bash <({echo_cmd})"$?
+    }
+}
+
