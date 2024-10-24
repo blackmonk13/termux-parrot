@@ -222,7 +222,7 @@ fun build_launcher(tarball: Text, install_path: Text): Null? {
     
 
     // let launcher_content = $curl -s http://localhost/parrot.sh$?
-    let launcher_content = $curl -s https://github.com/blackmonk13/termux-parrot/releases/download/latest/parrot-launcher.sh$?
+    let launcher_content = $curl -s https://github.com/blackmonk13/termux-parrot/releases/download/latest/launcher.sh$?
     let new_content = replace(launcher_content, "placeholder_install_folder", "{install_path}")
     file_write(parrot_launcher, new_content)?
     
