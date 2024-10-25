@@ -53,7 +53,7 @@ pkg update && pkg upgrade -y
 
 2. Run the installer:
 ```bash
-bash <(curl -s "https://github.com/blackmonk13/termux-parrot/releases/latest/download/installer.sh")
+bash <(wget -qO- "https://github.com/blackmonk13/termux-parrot/releases/latest/download/installer.sh")
 ```
 
 ## 🎈 Usage <a name="usage"></a>
